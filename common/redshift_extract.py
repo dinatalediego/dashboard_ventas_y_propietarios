@@ -30,7 +30,7 @@ def load_redshift_config() -> dict:
         "password": os.getenv("REDSHIFT_PASSWORD"),
         "tables": [
             t.strip()
-            for t in os.getenv("REDSHIFT_TABLES", "proformas,procesos,datos_extras,unidades").split(",")
+            for t in os.getenv("REDSHIFT_TABLES", "proformas,procesos,datos_extras,unidades, clientes_proyectos").split(",")
             if t.strip()
         ],
         "raw_output_format": os.getenv("RAW_OUTPUT_FORMAT", "parquet").lower(),

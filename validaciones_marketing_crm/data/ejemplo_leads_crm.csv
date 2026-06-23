@@ -1,0 +1,6 @@
+proyecto,fecha_registro,nombre,documento,correo,telefono,estado_lead,observacion
+ALICANTO,2026-05-03,Cliente Demo 1,12345678,demo1@email.com,987654321,Contactado,
+ALICANTO,2026-05-04,Cliente Demo 2,87654321,,912345678,No perfil,NO PERFIL
+ALICANTO,2026-05-05,Cliente Demo 3,11112222,demo3@email.com,,No contactado,NO RESPONDIO
+ALICANTO,2026-05-06,Cliente Demo 4,33334444,demo4@email.com,51912345678,No califica,NO ALCANZA CUOTA
+OTRO,2026-05-07,Cliente Demo 5,55556666,demo5@email.com,999888777,Contactado,

@@ -85,43 +85,18 @@ Invoke-Step "2.0/11 Ejecutando Ingresos Cobrados..." {
     streamlit run $DashboardPath
 }
 
-$ErrorActionPreference = "Stop"
-
-Write-Host "=========================================="
-Write-Host "Ejecutando validaciones Marketing / CRM"
-Write-Host "=========================================="
-
-if (!(Test-Path "data\raw\clientes_proyectos.xlsx")) {
-    Write-Host "ERROR: No se encontro data\raw\clientes_proyectos"
-    Write-Host "Coloca tu export del CRM/Formularios en la carpeta data y renombralo como leads_crm.xlsx"
-    exit 1
-}
-
-Invoke-Step "3/Marketing..." {
-       
-    $AuditFormularios = Join-Path $PSScriptRoot "validaciones_marketing_crm\audit_leads_formularios.py"
-    python $AuditFormularios
-}
-
-Invoke-Step "4/Marketing..." {
-       
-    $BDnegativa = Join-Path $PSScriptRoot "validaciones_marketing_crm\generar_bbdd_negativa.py"
-    python $BDnegativa
-}
-<# 
-Write-Host "1/2 Auditoria leads formularios..."
-python audit_leads_formularios.py
-
-Write-Host "2/2 BBDD negativa exclusion..."
-python generar_bbdd_negativa.py
-#>
-Write-Host "=========================================="
-Write-Host "Listo. Revisa la carpeta outputs"
-Write-Host "=========================================="
-
-
 
     
+Write-Host "Validando patch EFAC priority en cobranza merge..." -ForegroundColor Cyan
+$MergeScript = ".\3_merge_venta_recibido\cobranza_pipeline.py"
+$MergeContent = Get-Content $MergeScript -Raw
+if ($MergeContent -notmatch "add_efac_priority_columns_to_pagos_eventos") {
+    Write-Host "ADVERTENCIA: No detecto patch EFAC priority en $MergeScript" -ForegroundColor Yellow
+} else {
+    Write-Host "OK: patch EFAC priority detectado." -ForegroundColor Green
+}
+
+
 Write-Host ""
 Write-Host "==============================================" -ForegroundColor Green
 Write-Host " PIPELINE COMPLETADO" -ForegroundColor Green

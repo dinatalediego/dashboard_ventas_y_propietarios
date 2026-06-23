@@ -156,7 +156,7 @@ def make_excel_bytes(df: pd.DataFrame, selected_columns: list[str]) -> bytes:
     calc_registry = CalculatedColumnRegistry()
     calc_names = set(calc_registry.available())
     config = PipelineConfig(
-        raw_dir=Path("../data/raw"),
+        raw_dir=Path("data/raw"),
         out_dir=Path(tempfile.mkdtemp()),
         output_name="ventas_por_proyecto_dashboard.xlsx",
         columns=build_column_specs(selected_columns, extra_columns=None),
@@ -176,7 +176,7 @@ st.caption("Dashboard operativo desde parquets locales + descarga Excel aestheti
 
 with st.sidebar:
     st.markdown("## Configuración")
-    raw_dir = st.text_input("Carpeta raw", value="../data/raw")
+    raw_dir = st.text_input("Carpeta raw", value="data/raw")
 
     all_columns = available_column_names()
     default_columns = [c.name for c in DEFAULT_COLUMNS]
