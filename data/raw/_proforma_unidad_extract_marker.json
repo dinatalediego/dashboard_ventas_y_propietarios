@@ -1,7 +1,7 @@
 {
   "table": "proforma_unidad",
-  "extract_date": "2026-06-23",
-  "extracted_at": "2026-06-23T10:44:49",
-  "rows": 41185,
+  "extract_date": "2026-07-08",
+  "extracted_at": "2026-07-08T16:53:51",
+  "rows": 41766,
   "format": "parquet"
 }
