@@ -22,7 +22,7 @@ streamlit run app_ventas_dashboard.py
 """
 
 from __future__ import annotations
-
+#!pip install plotly
 import tempfile
 from pathlib import Path
 

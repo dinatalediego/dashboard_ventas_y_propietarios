@@ -1,156 +1,217 @@
 param(
     [switch]$SkipRedshift,
-    [switch]$ContinueOnRedshiftFail
+    [switch]$ContinueOnRedshiftFail,
+    [switch]$SkipInstall,
+    [switch]$NoDashboard,
+    [string]$DashboardPath
 )
 
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
-Write-Host ""
-Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host " PROPIETARIOS " -ForegroundColor Cyan
-Write-Host "==============================================" -ForegroundColor Cyan
-Write-Host ""
-
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Root)) {
+    $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
 Set-Location $Root
 
-function Use-ProjectEnv {
-    if (Test-Path ".\env\Scripts\Activate.ps1") {
-        Write-Host "Activando env existente: env" -ForegroundColor Green
-        . ".\env\Scripts\Activate.ps1"
-    }
-    elseif (Test-Path ".\.venv\Scripts\Activate.ps1") {
-        Write-Host "Activando env existente: .venv" -ForegroundColor Green
-        . ".\.venv\Scripts\Activate.ps1"
-    }
-    else {
-        Write-Host "No se encontró env/.venv. Creando .venv..." -ForegroundColor Yellow
-        python -m venv .venv
-        . ".\.venv\Scripts\Activate.ps1"
-    }
+function Write-Title {
+    param([string]$Text, [string]$Color = "Cyan")
+    Write-Host ""
+    Write-Host "==============================================" -ForegroundColor $Color
+    Write-Host " $Text" -ForegroundColor $Color
+    Write-Host "==============================================" -ForegroundColor $Color
 }
 
-function Invoke-Step {
+function Resolve-PythonCommand {
+    $candidates = @("python", "py")
+    foreach ($cmd in $candidates) {
+        $found = Get-Command $cmd -ErrorAction SilentlyContinue
+        if ($found) { return $cmd }
+    }
+    throw "No se encontró Python en PATH. Instala Python o activa tu entorno virtual manualmente."
+}
+
+function Use-ProjectEnv {
+    $envCandidates = @(
+        (Join-Path $Root ".venv\Scripts\Activate.ps1"),
+        (Join-Path $Root "env\Scripts\Activate.ps1")
+    )
+
+    foreach ($activate in $envCandidates) {
+        if (Test-Path $activate) {
+            Write-Host "Activando entorno: $activate" -ForegroundColor Green
+            . $activate
+            return
+        }
+    }
+
+    Write-Host "No se encontró .venv/env. Creando .venv..." -ForegroundColor Yellow
+    $py = Resolve-PythonCommand
+    & $py -m venv (Join-Path $Root ".venv")
+    $newActivate = Join-Path $Root ".venv\Scripts\Activate.ps1"
+
+    if (-not (Test-Path $newActivate)) {
+        throw "No se pudo crear el entorno virtual en .venv"
+    }
+
+    . $newActivate
+}
+
+function Invoke-NativeStep {
     param(
-        [string]$StepName,
-        [scriptblock]$Command
+        [Parameter(Mandatory = $true)][string]$StepName,
+        [Parameter(Mandatory = $true)][scriptblock]$Command,
+        [switch]$ContinueOnFail
     )
 
     Write-Host ""
     Write-Host $StepName -ForegroundColor Cyan
-    & $Command
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "Falló el paso: $StepName"
-    }
-}
-
-Use-ProjectEnv
-
-Write-Host "Instalando / validando dependencias..." -ForegroundColor Cyan
-python -m pip install --upgrade pip
-<# if (Test-Path ".\requirements.txt") {
-    pip install -r requirements.txt
-}
-else {
-    pip install pandas numpy pyarrow openpyxl python-dotenv sqlalchemy psycopg2-binary rapidfuzz scikit-learn pyyaml
-} #>
-
-if (Test-Path ".\requirements.txt") {
-    python -m pip install -r requirements.txt
-}
-else {
-    python -m pip install pandas numpy pyarrow openpyxl python-dotenv sqlalchemy psycopg2-binary rapidfuzz scikit-learn pyyaml streamlit plotly
-}
-
-if (-not $SkipRedshift) {
     try {
-        Invoke-Step "0/11 Extrayendo Redshift con cache diario..." {
-            python .\tools\extract_redshift_daily.py
+        & $Command
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+
+        if ($exitCode -ne 0) {
+            throw "ExitCode=$exitCode"
         }
+
+        Write-Host "OK: $StepName" -ForegroundColor Green
     }
     catch {
-        if ($ContinueOnRedshiftFail) {
-            Write-Host "Redshift falló, pero continúo con parquets locales existentes." -ForegroundColor Yellow
+        if ($ContinueOnFail) {
+            Write-Host "ADVERTENCIA: Falló el paso '$StepName', pero se continúa. Detalle: $($_.Exception.Message)" -ForegroundColor Yellow
         }
         else {
-            throw
+            throw "Falló el paso: $StepName. Detalle: $($_.Exception.Message)"
         }
     }
+}
+
+function Install-Dependencies {
+    if ($SkipInstall) {
+        Write-Host "Saltando instalación de dependencias por parámetro -SkipInstall" -ForegroundColor Yellow
+        return
+    }
+
+    Invoke-NativeStep "Validando pip..." {
+        python -m pip install --upgrade pip
+    }
+
+    if (Test-Path (Join-Path $Root "requirements.txt")) {
+        Invoke-NativeStep "Instalando dependencias desde requirements.txt..." {
+            python -m pip install -r (Join-Path $Root "requirements.txt")
+        }
+    }
+    else {
+        Invoke-NativeStep "Instalando dependencias base..." {
+            python -m pip install pandas numpy pyarrow openpyxl python-dotenv sqlalchemy psycopg2-binary rapidfuzz scikit-learn pyyaml streamlit plotly
+        }
+    }
+}
+
+function Resolve-DashboardPath {
+    param([string]$RequestedPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $candidate = if ([System.IO.Path]::IsPathRooted($RequestedPath)) {
+            $RequestedPath
+        }
+        else {
+            Join-Path $Root $RequestedPath
+        }
+
+        if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+        throw "El DashboardPath indicado no existe: $candidate"
+    }
+
+    $candidates = @(
+        "ventas_dashboard\run_app_ventas_dashboard.py",
+        "ventas_dashboard\app_ventas_dashboard.py",
+        "app_ventas_dashboard.py",
+        "run_app_ventas_dashboard.py",
+        "dashboard\app.py",
+        "app.py"
+    ) | ForEach-Object { Join-Path $Root $_ }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return (Resolve-Path $candidate).Path }
+    }
+
+    $found = Get-ChildItem $Root -Recurse -File -Filter "*.py" |
+        Where-Object { $_.Name -match "dashboard|streamlit|app" } |
+        Select-Object -First 1
+
+    if ($found) { return $found.FullName }
+
+    Write-Host "No se encontró un archivo de dashboard automáticamente." -ForegroundColor Red
+    Write-Host "Archivos .py detectados en el proyecto:" -ForegroundColor Yellow
+    Get-ChildItem $Root -Recurse -File -Filter "*.py" |
+        Select-Object FullName |
+        Format-Table -AutoSize
+
+    throw "No se encontró el dashboard. Pásalo explícitamente con -DashboardPath 'ruta\archivo.py'."
+}
+
+function Open-StreamlitDashboard {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) {
+        throw "No existe el archivo Streamlit: $Path"
+    }
+
+    Write-Host "Dashboard detectado: $Path" -ForegroundColor Green
+
+    $activatePath = Join-Path $Root ".venv\Scripts\Activate.ps1"
+    $dashboardEscaped = $Path.Replace("'", "''")
+    $rootEscaped = $Root.Replace("'", "''")
+    $activateEscaped = $activatePath.Replace("'", "''")
+
+    if (Test-Path $activatePath) {
+        $command = "Set-Location '$rootEscaped'; . '$activateEscaped'; python -m streamlit run '$dashboardEscaped'"
+    }
+    else {
+        $command = "Set-Location '$rootEscaped'; python -m streamlit run '$dashboardEscaped'"
+    }
+
+    Start-Process powershell -ArgumentList @("-NoExit", "-Command", $command)
+    Write-Host "Streamlit se abrió en otra ventana para no bloquear el pipeline." -ForegroundColor Green
+}
+
+Write-Title "PROPIETARIOS"
+Write-Host "Raíz del proyecto: $Root" -ForegroundColor DarkCyan
+
+Use-ProjectEnv
+Install-Dependencies
+
+if (-not $SkipRedshift) {
+    Invoke-NativeStep "0/11 Extrayendo Redshift con cache diario..." {
+        python (Join-Path $Root "tools\extract_redshift_daily.py")
+    } -ContinueOnFail:$ContinueOnRedshiftFail
 }
 else {
     Write-Host "0/11 Saltando Redshift. Usando parquets locales existentes..." -ForegroundColor Yellow
 }
 
-Invoke-Step "1/ Ejecutando Ventas..." {
-    python .\ventas_por_cobrar\main_pipeline.py
+Invoke-NativeStep "1/11 Ejecutando Ventas..." {
+    python (Join-Path $Root "ventas_por_cobrar\main_pipeline.py")
 }
 
-Invoke-Step "2.0/11 Abriendo Dashboard Ventas..." {
-    $DashboardPath = Join-Path $PSScriptRoot "ventas_dashboard\app_ventas_dashboard.py"
-
-    if (!(Test-Path $DashboardPath)) {
-        throw "No se encontró el dashboard en: $DashboardPath"
+if (-not $NoDashboard) {
+    Invoke-NativeStep "2/11 Abriendo Dashboard Ventas..." {
+        $resolvedDashboardPath = Resolve-DashboardPath -RequestedPath $DashboardPath
+        Open-StreamlitDashboard -Path $resolvedDashboardPath
     }
-
-    Start-Process powershell -ArgumentList @(
-        "-NoExit",
-        "-Command",
-        "cd '$PSScriptRoot'; . .\.venv\Scripts\Activate.ps1; python -m streamlit run '$DashboardPath'"
-    )
 }
-<# Invoke-Step "2.0/11 Ejecutando Ingresos Cobrados..." {
-    
-    $DashboardPath = Join-Path $PSScriptRoot "ventas_dashboard\app_ventas_dashboard.py"
-    python -m streamlit run $DashboardPath
-    #streamlit run $DashboardPath
-}
- #>
-
- 
-$ErrorActionPreference = "Stop"
-
-Write-Host "=========================================="
-Write-Host "Ejecutando validaciones Marketing / CRM"
-Write-Host "=========================================="
-
-#if (!(Test-Path "data\raw\clientes_proyectos.xlsx")) {
-<# if (!(Test-Path "data\raw\clientes_proyectos.parquet")) {
-
-    Write-Host "ERROR: No se encontro data\raw\clientes_proyectos"
-    Write-Host "Coloca tu export del CRM/Formularios en la carpeta data y renombralo como leads_crm.xlsx"
-    exit 1
-} #>
-
-<# Invoke-Step "3/Marketing..." {
-       
-    $AuditFormularios = Join-Path $PSScriptRoot "validaciones_marketing_crm\audit_leads_formularios.py"
-    python $AuditFormularios
+else {
+    Write-Host "2/11 Saltando dashboard por parámetro -NoDashboard" -ForegroundColor Yellow
 }
 
-Invoke-Step "4/Marketing..." {
-       
-    $BDnegativa = Join-Path $PSScriptRoot "validaciones_marketing_crm\generar_bbdd_negativa.py"
-    python $BDnegativa
-} #>
-<# 
-Write-Host "1/2 Auditoria leads formularios..."
-python audit_leads_formularios.py
-
-Write-Host "2/2 BBDD negativa exclusion..."
-python generar_bbdd_negativa.py
-#>
-Write-Host "=========================================="
-Write-Host "Listo. Revisa la carpeta outputs"
-Write-Host "=========================================="
-
-
-
-    
 Write-Host ""
-Write-Host "==============================================" -ForegroundColor Green
-Write-Host " PIPELINE COMPLETADO" -ForegroundColor Green
-Write-Host "==============================================" -ForegroundColor Green
-Write-Host "Output matriz:" -ForegroundColor Green
-Write-Host "data\gold\power_bi\matriz_venta_cobranza" -ForegroundColor Green
+Write-Host "==========================================" -ForegroundColor Green
+Write-Host "Listo. Revisa la carpeta outputs" -ForegroundColor Green
+Write-Host "==========================================" -ForegroundColor Green
+
+Write-Title "PIPELINE COMPLETADO" "Green"
+Write-Host "Output matriz: data\gold\power_bi\matriz_venta_cobranza" -ForegroundColor Green
 Write-Host ""
