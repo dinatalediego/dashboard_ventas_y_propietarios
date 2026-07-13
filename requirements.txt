@@ -23,3 +23,5 @@ pyarrow>=16.0.0
 pydantic>=2.7.0
 python-dotenv>=1.0.1
 numpy>=1.26.0
+streamlit
+nbformat
